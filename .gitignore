@@ -1,0 +1,9 @@
+node_modules
+.next
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
+
+# ローカルの対局記録
+data/*.sqlite
+data/*.sqlite-*
