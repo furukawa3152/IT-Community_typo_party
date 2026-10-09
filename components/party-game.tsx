@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
 import { formatTime } from '@/lib/format'
 import {
@@ -12,12 +12,13 @@ import {
 import { pickRound, ROUND_SIZE } from '@/lib/round'
 import {
   advanceStates,
-  buildUnits,
+  allowsTrailingN,
   calcResult,
-  endsWithSyllabicN,
   INITIAL_STATES,
   isWordComplete,
+  normalizeKey,
   typedLength,
+  unitsFor,
   type TypingState,
   type TypingUnit,
 } from '@/lib/typing'
@@ -121,7 +122,7 @@ export function PartyGame() {
     const next: Session = {
       queue,
       index: 0,
-      units: buildUnits(queue[0].romaji),
+      units: unitsFor(queue[0]),
       states: [...INITIAL_STATES],
       graceN: false,
       hits: 0,
@@ -194,12 +195,12 @@ export function PartyGame() {
       }
       if (event.repeat) return
 
-      const key = normalizeKey(event.key)
-      if (!key) return
-      event.preventDefault()
-
       const current = sessionRef.current
       if (!current) return
+      const word = current.queue[current.index]
+      const key = normalizeKey(event.key, Boolean(word.lang))
+      if (!key) return
+      event.preventDefault()
       const nextStates = advanceStates(current.units, current.states, key)
 
       if (nextStates.length === 0) {
@@ -224,7 +225,7 @@ export function PartyGame() {
         states: nextStates,
         hits,
         cleared,
-        graceN: endsWithSyllabicN(current.queue[current.index].romaji),
+        graceN: allowsTrailingN(word),
       }
 
       if (cleared >= ROUND_SIZE) {
@@ -242,7 +243,7 @@ export function PartyGame() {
       applySession({
         ...finished,
         index: nextIndex,
-        units: buildUnits(current.queue[nextIndex].romaji),
+        units: unitsFor(current.queue[nextIndex]),
         states: [...INITIAL_STATES],
       })
     }
@@ -295,74 +296,121 @@ export function PartyGame() {
 
   if (phase === 'countdown') {
     return (
-      <main className="party">
-        <Header />
-        <div className="center">
-          <p className="meta">{identity?.community} / {identity?.playerName}</p>
-          <p className="count" aria-live="assertive">{count}</p>
-          <p className="meta">20語句。カウントが終わったら計測開始</p>
-        </div>
+      <main className="stage countdown">
+        <p className="who">
+          <span>{identity?.community}</span>
+          <span className="who-name">{identity?.playerName}</span>
+        </p>
+        <p key={count} className="count" aria-live="assertive">{count}</p>
+        <p className="countdown-note">用語12個とコード8行。カウントが終わると計測が始まる</p>
       </main>
     )
   }
 
   if (phase === 'playing' && session) {
     const word = session.queue[session.index]
+    const upcoming = session.queue[session.index + 1]
     const typed = typedLength(session.units, session.states)
     return (
-      <main className="party">
-        <section className="play-top">
-          <div>
-            <p className="kicker">{identity?.community}</p>
-            <p className="progress" data-testid="progress">
-              {session.cleared + 1} / {ROUND_SIZE}
-            </p>
-          </div>
-          <p className="timer" data-testid="timer">{formatTime(elapsedMs)}</p>
-        </section>
-        <section className={`card prompt${isMiss ? ' miss' : ''}`}>
-          <h2>{word.display}</h2>
-          <p className="romaji" data-testid="romaji">
-            {word.romaji.split('').map((char, index) => {
-              const isDone = index < typed
-              const isCurrent = index === typed
-              const className = isCurrent ? `now${isMiss ? ' miss' : ''}` : isDone ? 'done' : ''
+      <main className="stage play">
+        <header className="hud">
+          <p className="who">
+            <span>{identity?.community}</span>
+            <span className="who-name">{identity?.playerName}</span>
+          </p>
+          <p className="clock" data-testid="timer">{formatTime(elapsedMs)}</p>
+        </header>
+
+        <Track queue={session.queue} cleared={session.cleared} />
+
+        <section
+          key={session.index}
+          className={`prompt${word.lang ? ' is-code' : ''}${isMiss ? ' is-miss' : ''}`}
+          aria-live="polite"
+        >
+          <p className="prompt-meta">
+            <span className="progress" data-testid="progress">
+              {session.cleared + 1}<span className="of">/{ROUND_SIZE}</span>
+            </span>
+            {word.lang && <span className="lang" data-testid="lang">{word.lang}</span>}
+          </p>
+          <h2 className="gloss">{word.display}</h2>
+          <p
+            className="line"
+            data-testid="romaji"
+            style={{ '--len': word.keys.length } as CSSProperties}
+          >
+            {word.keys.split('').map((char, index) => {
+              const state = index < typed ? 'done' : index === typed ? 'now' : 'todo'
               return (
-                <span key={`${word.romaji}-${index}`} className={className}>
+                <span
+                  key={`${word.keys}-${index}`}
+                  className={`ch ${state}${char === ' ' ? ' space' : ''}`}
+                >
                   {char === ' ' ? '␣' : char}
                 </span>
               )
             })}
           </p>
         </section>
-        <p className="meta">Esc で登録画面に戻る。戻ったプレイは記録されない</p>
+
+        <footer className="play-foot">
+          <p className="next">
+            {upcoming ? (
+              <>
+                <span className="next-label">つぎ</span>
+                {upcoming.lang && <span className="lang small">{upcoming.lang}</span>}
+                <span className="next-word">{upcoming.display}</span>
+              </>
+            ) : (
+              <span className="next-label">これが最後</span>
+            )}
+          </p>
+          <p className="hint">
+            ミス <strong>{session.misses}</strong>
+            <span className="sep" />
+            <kbd>Esc</kbd> でやめる。記録は残らない
+          </p>
+        </footer>
       </main>
     )
   }
 
   if (phase === 'result' && session && result && identity) {
+    const myCommunity = rankings.communities.find(
+      (entry) => entry.communityKey === identity.communityKey,
+    )
     return (
-      <main className="party">
-        <Header />
-        <section className="card result-hero">
-          <div>
-            <p className="kicker">{identity.community}</p>
-            <h2>{identity.playerName}</h2>
-            {isBest && <p className="best">自己ベスト</p>}
+      <main className="stage result">
+        <Masthead compact />
+        <div className="result-grid">
+          <section className="result-hero">
+            <p className="who">
+              <span>{identity.community}</span>
+              <span className="who-name">{identity.playerName}</span>
+            </p>
+            <p className="final" data-testid="final-time">{formatTime(session.elapsedMs)}</p>
+            <div className="badges">
+              {isBest && <p className="best">自己ベスト更新</p>}
+              {myCommunity && (
+                <p className="standing">
+                  コミュニティ <strong>{myCommunity.rank}</strong> 位
+                </p>
+              )}
+            </div>
             {saveError && <p className="error">{saveError}</p>}
-          </div>
-          <p className="timer" data-testid="final-time">{formatTime(session.elapsedMs)}</p>
-        </section>
-        <div className="stats">
-          <div className="stat"><span>正確率</span><strong>{result.accuracy}%</strong></div>
-          <div className="stat"><span>打鍵/分</span><strong>{result.kpm}</strong></div>
-          <div className="stat"><span>ミス</span><strong>{session.misses}</strong></div>
+            <dl className="stats">
+              <div><dt>正確率</dt><dd>{result.accuracy}<small>%</small></dd></div>
+              <div><dt>打鍵/分</dt><dd>{result.kpm}</dd></div>
+              <div><dt>ミス</dt><dd>{session.misses}</dd></div>
+            </dl>
+            <div className="actions">
+              <button type="button" className="primary" onClick={startRound}>もう一度</button>
+              <button type="button" className="ghost" onClick={() => setPhase('entry')}>名前を変える</button>
+            </div>
+          </section>
+          <RankingsView rankings={rankings} ready identity={identity} />
         </div>
-        <div className="actions">
-          <button type="button" className="primary" onClick={startRound}>もう一度</button>
-          <button type="button" className="ghost" onClick={() => setPhase('entry')}>名前を変える</button>
-        </div>
-        <RankingsView rankings={rankings} ready identity={identity} />
       </main>
     )
   }
@@ -370,65 +418,69 @@ export function PartyGame() {
   const ready = parseIdentity(community, playerName) !== null
 
   return (
-    <main className="party">
-      <Header />
-      <p className="lead">
-        プログラミングのことばを20個。表示されたローマ字を打ち切るまでの速さで、コミュニティの順位が動く。
-      </p>
-      <div className="layout">
+    <main className="stage entry">
+      <Masthead />
+      <div className="entry-grid">
         <form
-          className="card"
+          className="entry-form"
           onSubmit={(event) => {
             event.preventDefault()
             startRound()
           }}
         >
-          <label htmlFor="community">コミュニティ</label>
-          {communities.length > 0 && (
-            <div className="choices" role="group" aria-label="入力済みのコミュニティ">
-              {communities.map((option) => {
-                const selected = communityKeyOf(community) === option.communityKey
-                return (
-                  <button
-                    key={option.communityKey}
-                    type="button"
-                    className={selected ? 'choice on' : 'choice'}
-                    aria-pressed={selected}
-                    onClick={() => setCommunity(option.community)}
-                  >
-                    {option.community}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-          <input
-            id="community"
-            value={community}
-            onChange={(event) => setCommunity(event.target.value)}
-            placeholder="例: Saga.js"
-            maxLength={40}
-            autoComplete="organization"
-            required
-          />
-          <label htmlFor="player-name">名前</label>
-          <input
-            id="player-name"
-            value={playerName}
-            onChange={(event) => setPlayerName(event.target.value)}
-            placeholder="例: たろう"
-            maxLength={40}
-            autoComplete="nickname"
-            required
-          />
-          <button className="primary" type="submit" disabled={!ready}>
-            20語句に挑戦する
+          <p className="lead">
+            プログラミングのことば12個と、Python や HTML の1行コード8行。20問を打ち切るまでの速さで、コミュニティの順位が動く。
+          </p>
+          <div className="field">
+            <label htmlFor="community">コミュニティ</label>
+            {communities.length > 0 && (
+              <div className="choices" role="group" aria-label="入力済みのコミュニティ">
+                {communities.map((option) => {
+                  const selected = communityKeyOf(community) === option.communityKey
+                  return (
+                    <button
+                      key={option.communityKey}
+                      type="button"
+                      className={selected ? 'choice on' : 'choice'}
+                      aria-pressed={selected}
+                      onClick={() => setCommunity(option.community)}
+                    >
+                      {option.community}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            <input
+              id="community"
+              value={community}
+              onChange={(event) => setCommunity(event.target.value)}
+              placeholder="例: Saga.js"
+              maxLength={40}
+              autoComplete="organization"
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="player-name">名前</label>
+            <input
+              id="player-name"
+              value={playerName}
+              onChange={(event) => setPlayerName(event.target.value)}
+              placeholder="例: たろう"
+              maxLength={40}
+              autoComplete="nickname"
+              required
+            />
+          </div>
+          <button className="primary start" type="submit" disabled={!ready}>
+            20問に挑戦する
           </button>
-          <ul className="notes">
-            <li>計測はカウント後、最初の語句から始まる</li>
-            <li>「ん」は n でも nn でも打てる。「し」は shi でも si でも打てる</li>
-            <li>長音の「ー」はハイフン。空白はスペース</li>
-            <li>コミュニティの順位は、その中で一番速い人のタイムで決まる</li>
+          <ul className="rules">
+            <li><kbd>n</kbd> でも <kbd>nn</kbd> でも「ん」。<kbd>shi</kbd> でも <kbd>si</kbd> でも「し」</li>
+            <li>長音の「ー」は <kbd>-</kbd>、空白は <kbd>Space</kbd></li>
+            <li>コードは書いてあるとおり。記号も大文字小文字もそのまま</li>
+            <li>日本語入力はオフにしておく</li>
           </ul>
         </form>
         <RankingsView
@@ -441,12 +493,31 @@ export function PartyGame() {
   )
 }
 
-function Header() {
+function Masthead({ compact = false }: { compact?: boolean }) {
   return (
-    <header>
-      <p className="kicker">SAGA IT COMMUNITY DAY 2027</p>
-      <h1>TYPE PARTY</h1>
+    <header className={compact ? 'masthead compact' : 'masthead'}>
+      <p className="event">SAGA IT COMMUNITY DAY 2027</p>
+      <h1 className="wordmark">
+        TYPE PARTY<span className="caret" aria-hidden="true" />
+      </h1>
     </header>
+  )
+}
+
+/** 20問の進み具合。用語は丸、コードは横長で示す */
+function Track({ queue, cleared }: { queue: readonly Word[]; cleared: number }) {
+  return (
+    <ol className="track" aria-label={`${cleared} / ${queue.length} 問クリア`}>
+      {queue.map((word, index) => {
+        const state = index < cleared ? 'done' : index === cleared ? 'now' : 'todo'
+        return (
+          <li
+            key={`${word.keys}-${index}`}
+            className={`pip ${state}${word.lang ? ' code' : ''}`}
+          />
+        )
+      })}
+    </ol>
   )
 }
 
@@ -460,11 +531,11 @@ function RankingsView({
   ready: boolean
 }) {
   return (
-    <section className="card ranking">
+    <section className="ranking">
       <h2>コミュニティ順位</h2>
-      <p>速い方が上。数字は、そのコミュニティで一番速い人のタイム。</p>
+      <p className="ranking-note">数字は、そのコミュニティで一番速い人のタイム</p>
       {rankings.communities.length === 0 ? (
-        <p className="empty">{ready ? 'まだ記録がありません' : '読み込み中'}</p>
+        <p className="empty">{ready ? 'まだ記録がない。最初の1人になろう' : '読み込み中'}</p>
       ) : (
         <ol className="board" data-testid="community-ranking">
           {rankings.communities.map((entry) => (
@@ -473,9 +544,9 @@ function RankingsView({
               className={entry.communityKey === identity?.communityKey ? 'me' : ''}
             >
               <span className="rank-no">{entry.rank}</span>
-              <span>
+              <span className="name">
                 {entry.community}
-                <span className="meta"> {entry.members}人</span>
+                <span className="sub">{entry.members}人</span>
               </span>
               <span className="time">{formatTime(entry.bestMs)}</span>
             </li>
@@ -485,9 +556,9 @@ function RankingsView({
 
       <h2 className="subhead">個人の自己ベスト</h2>
       {rankings.players.length === 0 ? (
-        <p className="empty">{ready ? '20語句を打ち切るとここに載る' : '読み込み中'}</p>
+        <p className="empty">{ready ? '20問を打ち切るとここに載る' : '読み込み中'}</p>
       ) : (
-        <ol className="board" data-testid="player-ranking">
+        <ol className="board players" data-testid="player-ranking">
           {rankings.players.slice(0, 20).map((entry) => {
             const mine =
               entry.communityKey === identity?.communityKey &&
@@ -495,9 +566,9 @@ function RankingsView({
             return (
               <li key={`${entry.communityKey}:${entry.playerKey}`} className={mine ? 'me' : ''}>
                 <span className="rank-no">{entry.rank}</span>
-                <span>
+                <span className="name">
                   {entry.playerName}
-                  <span className="meta"> {entry.community}</span>
+                  <span className="sub">{entry.community}</span>
                 </span>
                 <span className="time">{formatTime(entry.bestMs)}</span>
               </li>
@@ -507,13 +578,6 @@ function RankingsView({
       )}
     </section>
   )
-}
-
-function normalizeKey(key: string): string | null {
-  if (key === ' ' || key === '-') return key
-  if (/^[a-z]$/.test(key)) return key
-  if (/^[A-Z]$/.test(key)) return key.toLowerCase()
-  return null
 }
 
 function identityFromRefs(rankings: Rankings, community: string, playerName: string) {

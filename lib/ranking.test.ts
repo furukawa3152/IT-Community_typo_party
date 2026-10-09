@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 
 import { buildRankings, type RunRecord } from '@/lib/ranking'
-import { pickRound, ROUND_SIZE } from '@/lib/round'
+import { CODE_COUNT, pickRound, ROUND_SIZE, TERM_COUNT } from '@/lib/round'
 import { parseRun } from '@/lib/runs'
 import { WORDS } from '@/lib/words'
 
@@ -23,7 +23,18 @@ describe('20語句', () => {
     assert.ok(WORDS.length >= ROUND_SIZE)
     const round = pickRound()
     assert.equal(round.length, ROUND_SIZE)
-    assert.equal(new Set(round.map((word) => word.romaji)).size, ROUND_SIZE)
+    assert.equal(new Set(round.map((word) => word.keys)).size, ROUND_SIZE)
+  })
+
+  it('1試合は用語12個とコード8行で、Python 3行と HTML 2行以上を含む', () => {
+    for (let trial = 0; trial < 50; trial += 1) {
+      const round = pickRound()
+      const codes = round.filter((word) => word.lang)
+      assert.equal(round.length - codes.length, TERM_COUNT)
+      assert.equal(codes.length, CODE_COUNT)
+      assert.ok(codes.filter((word) => word.lang === 'Python').length >= 3)
+      assert.ok(codes.filter((word) => word.lang === 'HTML').length >= 2)
+    }
   })
 })
 
