@@ -99,6 +99,33 @@ export function buildUnits(romaji: string): TypingUnit[] {
   return expandSokuon(units)
 }
 
+/** コード用。1文字が1単位で、書いてある文字だけを受け付ける。 */
+export function buildLiteralUnits(text: string): TypingUnit[] {
+  return [...text].map((char) => ({ source: char, candidates: [char] }))
+}
+
+export function unitsFor(word: { keys: string; lang?: string }): TypingUnit[] {
+  return word.lang ? buildLiteralUnits(word.keys) : buildUnits(word.keys)
+}
+
+/** 打ち終えたあと、余分な n を1回だけ見逃すか。ローマ字の「ん」で終わる用語だけ */
+export function allowsTrailingN(word: { keys: string; lang?: string }): boolean {
+  return !word.lang && endsWithSyllabicN(word.keys)
+}
+
+/**
+ * KeyboardEvent.key を判定用の1文字にする。打てない入力は null。
+ * 用語は英字を小文字にそろえ、空白とハイフンだけ通す。
+ * コードは半角の表示文字をすべて、大文字小文字もそのまま通す。
+ */
+export function normalizeKey(key: string, literal: boolean): string | null {
+  if (literal) return /^[\x20-\x7e]$/.test(key) ? key : null
+  if (key === ' ' || key === '-') return key
+  if (/^[a-z]$/.test(key)) return key
+  if (/^[A-Z]$/.test(key)) return key.toLowerCase()
+  return null
+}
+
 export function advanceStates(
   units: readonly TypingUnit[],
   states: readonly TypingState[],
