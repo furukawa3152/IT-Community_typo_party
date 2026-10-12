@@ -6,8 +6,9 @@ import { parseCommunityName } from '@/lib/ranking'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-export function GET() {
-  return NextResponse.json({ communities: getPartyDb().listCommunities() })
+export async function GET() {
+  const db = await getPartyDb()
+  return NextResponse.json({ communities: await db.listCommunities() })
 }
 
 export async function POST(request: Request) {
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'コミュニティ名を確認してください' }, { status: 400 })
   }
 
-  const db = getPartyDb()
-  db.rememberCommunity(community)
-  return NextResponse.json({ communities: db.listCommunities() })
+  const db = await getPartyDb()
+  await db.rememberCommunity(community)
+  return NextResponse.json({ communities: await db.listCommunities() })
 }

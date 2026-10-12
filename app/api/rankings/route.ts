@@ -6,7 +6,8 @@ import { buildRankings } from '@/lib/ranking'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-export function GET() {
-  const rankings = buildRankings(getPartyDb().listRuns())
+export async function GET() {
+  const db = await getPartyDb()
+  const rankings = buildRankings(await db.listRuns())
   return NextResponse.json(rankings)
 }

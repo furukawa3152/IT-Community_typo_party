@@ -20,6 +20,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: '名前、コミュニティ、タイムを確認してください' }, { status: 400 })
   }
 
-  getPartyDb().insertRun(run)
-  return NextResponse.json(buildRankings(getPartyDb().listRuns()))
+  const db = await getPartyDb()
+  await db.insertRun(run)
+  return NextResponse.json(buildRankings(await db.listRuns()))
 }
