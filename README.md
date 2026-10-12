@@ -2,7 +2,7 @@
 
 [SAGA IT COMMUNITY DAY 2027](https://furukawa3152.github.io/saga-it-community-day2027/) で遊ぶ、プログラミング用語と1行コードのタイピング。コミュニティ名と名前を入れて、20問を打ち切るまでの速さでコミュニティの順位が決まる。
 
-いま動くのはローカル実行まで。公開先の Vercel と、そこに置く共有データベースはまだ入っていない。
+`DATABASE_URL` があれば記録は Neon Postgres に入る。未設定のローカル実行は、このマシンの SQLite に入る。
 
 ## 遊び方
 
@@ -59,7 +59,12 @@ pnpm typecheck
 
 ## 記録
 
-完了したプレイと、入力されたコミュニティ名は `data/party.sqlite` に保存する。このファイルは Git に含めない。同じマシンでサーバを動かしているブラウザ同士は、この記録を共有する。
+完了したプレイと、入力されたコミュニティ名を保存する。
+
+| 置き場所 | 条件 |
+| --- | --- |
+| Neon Postgres | `DATABASE_URL` があるとき。v0 から公開した本番はこちら |
+| `data/party.sqlite` | ローカルで `DATABASE_URL` が空のとき。このファイルは Git に含めない |
 
 | 経路 | 内容 |
 | --- | --- |
@@ -67,3 +72,13 @@ pnpm typecheck
 | `POST /api/runs` | 20問を打ち切った記録 |
 | `GET /api/communities` | 選択できるコミュニティ名 |
 | `POST /api/communities` | 挑戦開始時にコミュニティ名を残す |
+
+## デプロイ
+
+公開は [v0](https://v0.app) から Vercel へ出す。データベースは Neon。
+
+1. この GitHub リポジトリを v0 のプロジェクトとして開く
+2. Project の Settings → Integrations で Neon を作成する。`DATABASE_URL` がプロジェクトに入る
+3. Publish で本番に出す
+
+`DATABASE_URL` が空のまま Vercel 上で記録 API を呼ぶと失敗する。ローカルから同じ Neon を使うときは、接続文字列を `.env.local` に書く。書き方は `.env.example` を見る。
