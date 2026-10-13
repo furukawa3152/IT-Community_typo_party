@@ -270,8 +270,11 @@ export function PartyGame() {
       }),
     })
       .then(async (response) => {
-        if (!response.ok) throw new Error('save failed')
-        return response.json() as Promise<Rankings>
+        const data = (await response.json()) as Rankings | { error?: string }
+        if (!response.ok) {
+          throw new Error('error' in data && data.error ? data.error : 'save failed')
+        }
+        return data as Rankings
       })
       .then((data) => {
         if (!cancelled) setRankings(data)
