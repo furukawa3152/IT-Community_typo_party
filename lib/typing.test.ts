@@ -3,10 +3,7 @@ import { describe, it } from 'vitest'
 
 import {
   advanceStates,
-  allowsTrailingN,
   buildLiteralUnits,
-  buildUnits,
-  endsWithSyllabicN,
   INITIAL_STATES,
   isWordComplete,
   normalizeKey,
@@ -29,32 +26,32 @@ function typeUnits(units: TypingUnit[], keys: string) {
   }
 }
 
-function typeAll(romaji: string, keys: string) {
-  return typeUnits(buildUnits(romaji), keys)
+/** 画面で押したキーを、ゲームと同じく normalizeKey を通して打つ */
+function press(word: { keys: string; lang?: string }, typed: string) {
+  const keys = [...typed].map((key) => normalizeKey(key, Boolean(word.lang)))
+  if (keys.some((key) => key === null)) return { accepted: false, complete: false, typed: 0 }
+  return typeUnits(unitsFor(word), (keys as string[]).join(''))
 }
 
-describe('ローマ字の別表記', () => {
-  it('し は shi でも si でも打ち切れる', () => {
-    assert.equal(typeAll('shi', 'shi').complete, true)
-    assert.equal(typeAll('shi', 'si').complete, true)
-    assert.equal(typeAll('shi', 'si').typed, 3)
+describe('英単語', () => {
+  it('用語は小文字の英字と1つの空白だけ', () => {
+    for (const term of TERMS) {
+      assert.match(term.keys, /^[a-z]+( [a-z]+)?$/, term.keys)
+      assert.equal(term.lang, undefined, term.keys)
+    }
   })
 
-  it('ん は n 1回でも nn でも打ち切れる', () => {
-    assert.equal(endsWithSyllabicN('kankyouhensuu'), false)
-    assert.equal(typeAll('angouka', 'angouka').complete, true)
-    const units = buildUnits('kankyouhensuu')
-    const nUnit = units.find((unit) => unit.candidates.includes('nn'))
-    assert.ok(nUnit)
-    assert.equal(typeAll('kankyouhensuu', 'kannkyouhensuu').complete, true)
+  it('大文字で打っても通る', () => {
+    assert.equal(press({ keys: 'variable' }, 'Variable').complete, true)
+    assert.equal(press({ keys: 'pull request' }, 'PULL REQUEST').complete, true)
   })
 
-  it('っち は tti でも cchi でも打ち切れる', () => {
-    assert.equal(typeAll('matti', 'matti').complete, true)
-    assert.equal(typeAll('matti', 'macchi').complete, true)
+  it('ローマ字のゆれは受け付けない', () => {
+    assert.equal(press({ keys: 'function' }, 'hunc').accepted, false)
+    assert.equal(press({ keys: 'string' }, 'sutoringu').accepted, false)
   })
 
-  it('出題のローマ字どおりに打てば全部完了する', () => {
+  it('出題どおりに打てば全部完了する', () => {
     for (const word of WORDS) {
       const result = typeUnits(unitsFor(word), word.keys)
       assert.equal(result.complete, true, word.display)
@@ -85,11 +82,6 @@ describe('コード', () => {
     assert.equal(normalizeKey('Shift', true), null)
     assert.equal(normalizeKey('Enter', true), null)
     assert.equal(normalizeKey('Dead', true), null)
-  })
-
-  it('コードで終わっても n の見逃しはしない', () => {
-    assert.equal(allowsTrailingN({ keys: 'x = fn', lang: 'Python' }), false)
-    assert.equal(allowsTrailingN({ keys: 'kansuuten' }), true)
   })
 
   it('コードはどれも1行で、普通の配列で打てる半角文字だけ', () => {

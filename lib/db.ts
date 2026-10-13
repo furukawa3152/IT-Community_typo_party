@@ -2,12 +2,20 @@ import path from 'node:path'
 
 import type { CommunityOption, RunRecord } from '@/lib/ranking'
 import type { RunInput } from '@/lib/runs'
+import type { PartySettings } from '@/lib/settings'
 
 export type PartyDb = {
   insertRun: (run: RunInput) => Promise<void>
-  listRuns: () => Promise<RunRecord[]>
+  /** 指定した問題数で打ち切った記録だけを返す */
+  listRuns: (roundSize: number) => Promise<RunRecord[]>
   rememberCommunity: (community: CommunityOption) => Promise<void>
   listCommunities: () => Promise<CommunityOption[]>
+  getSettings: () => Promise<PartySettings>
+  saveSettings: (settings: PartySettings) => Promise<void>
+  /** 記録とコミュニティ名の件数 */
+  countAll: () => Promise<{ runs: number; communities: number }>
+  /** 記録とコミュニティ名をすべて消す。設定は残す */
+  resetAll: () => Promise<void>
   close: () => void
 }
 

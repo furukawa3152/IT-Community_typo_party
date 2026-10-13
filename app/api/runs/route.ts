@@ -22,5 +22,6 @@ export async function POST(request: Request) {
 
   const db = await getPartyDb()
   await db.insertRun(run)
-  return NextResponse.json(buildRankings(await db.listRuns()))
+  const { roundSize } = await db.getSettings()
+  return NextResponse.json(buildRankings(await db.listRuns(roundSize)))
 }
