@@ -23,7 +23,8 @@ export async function POST(request: Request) {
   try {
     const db = await getPartyDb()
     await db.insertRun(run)
-    return NextResponse.json(buildRankings(await db.listRuns()))
+    const { roundSize } = await db.getSettings()
+    return NextResponse.json(buildRankings(await db.listRuns(roundSize)))
   } catch (error) {
     console.error('[v0] Failed to save run:', error)
     return NextResponse.json(

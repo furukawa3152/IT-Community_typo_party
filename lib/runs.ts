@@ -1,4 +1,5 @@
 import { parseIdentity } from '@/lib/ranking'
+import { isRoundSize } from '@/lib/round'
 
 const MIN_ELAPSED_MS = 1
 const MAX_ELAPSED_MS = 30 * 60 * 1000
@@ -12,6 +13,8 @@ export type RunInput = {
   elapsedMs: number
   hits: number
   misses: number
+  /** その試合の問題数。順位は今の設定と同じ問題数の記録だけで並べる */
+  roundSize: number
 }
 
 export function parseRun(input: unknown): RunInput | null {
@@ -23,6 +26,7 @@ export function parseRun(input: unknown): RunInput | null {
   if (!identity) return null
   if (!Number.isInteger(body.elapsedMs)) return null
   if (!Number.isInteger(body.hits) || !Number.isInteger(body.misses)) return null
+  if (!isRoundSize(body.roundSize)) return null
 
   const elapsedMs = body.elapsedMs as number
   const hits = body.hits as number
@@ -31,5 +35,5 @@ export function parseRun(input: unknown): RunInput | null {
   if (hits < 1 || hits > MAX_KEY_COUNT) return null
   if (misses < 0 || misses > MAX_KEY_COUNT) return null
 
-  return { ...identity, elapsedMs, hits, misses }
+  return { ...identity, elapsedMs, hits, misses, roundSize: body.roundSize }
 }

@@ -2,7 +2,14 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
 
 import { buildRankings, type RunRecord } from '@/lib/ranking'
-import { CODE_COUNT, pickRound, ROUND_SIZE, TERM_COUNT } from '@/lib/round'
+import {
+  DEFAULT_ROUND_SIZE,
+  isRoundSize,
+  MAX_ROUND_SIZE,
+  MIN_ROUND_SIZE,
+  pickRound,
+  planRound,
+} from '@/lib/round'
 import { parseRun } from '@/lib/runs'
 import { WORDS } from '@/lib/words'
 
@@ -18,30 +25,55 @@ function run(partial: Partial<RunRecord> & Pick<RunRecord, 'elapsedMs'>): RunRec
   }
 }
 
-describe('20語句', () => {
-  it('語句は20個以上あり、1試合は20個で重複しない', () => {
-    assert.ok(WORDS.length >= ROUND_SIZE)
+describe('1試合のお題', () => {
+  it('既定は20問で、重複しない', () => {
+    assert.ok(WORDS.length >= DEFAULT_ROUND_SIZE)
     const round = pickRound()
-    assert.equal(round.length, ROUND_SIZE)
-    assert.equal(new Set(round.map((word) => word.keys)).size, ROUND_SIZE)
+    assert.equal(round.length, DEFAULT_ROUND_SIZE)
+    assert.equal(new Set(round.map((word) => word.keys)).size, DEFAULT_ROUND_SIZE)
   })
 
-  it('1試合は用語12個とコード8行で、Python 3行と HTML 2行以上を含む', () => {
+  it('20問は用語12個とコード8行で、Python 3行と HTML 2行以上を含む', () => {
+    const plan = planRound(20)
+    assert.equal(plan.terms, 12)
+    assert.equal(plan.codes, 8)
+    assert.deepEqual(plan.quota, { Python: 3, HTML: 2 })
     for (let trial = 0; trial < 50; trial += 1) {
       const round = pickRound()
       const codes = round.filter((word) => word.lang)
-      assert.equal(round.length - codes.length, TERM_COUNT)
-      assert.equal(codes.length, CODE_COUNT)
+      assert.equal(round.length - codes.length, 12)
+      assert.equal(codes.length, 8)
       assert.ok(codes.filter((word) => word.lang === 'Python').length >= 3)
       assert.ok(codes.filter((word) => word.lang === 'HTML').length >= 2)
     }
+  })
+
+  it('設定できる問題数はどれも、お題が足りて重複しない', () => {
+    for (let size = MIN_ROUND_SIZE; size <= MAX_ROUND_SIZE; size += 1) {
+      const plan = planRound(size)
+      assert.equal(plan.terms + plan.codes, size)
+      for (let trial = 0; trial < 5; trial += 1) {
+        const round = pickRound(size)
+        assert.equal(round.length, size)
+        assert.equal(new Set(round.map((word) => word.keys)).size, size)
+        assert.equal(round.filter((word) => !word.lang).length, plan.terms)
+      }
+    }
+  })
+
+  it('範囲外の問題数は受け付けない', () => {
+    assert.equal(isRoundSize(MIN_ROUND_SIZE - 1), false)
+    assert.equal(isRoundSize(MAX_ROUND_SIZE + 1), false)
+    assert.equal(isRoundSize(12.5), false)
+    assert.equal(isRoundSize('20'), false)
+    assert.throws(() => pickRound(MAX_ROUND_SIZE + 1))
   })
 })
 
 describe('記録の検証', () => {
   it('名前とコミュニティが空なら受け取らない', () => {
-    assert.equal(parseRun({ community: '  ', playerName: 'たろう', elapsedMs: 20_000, hits: 10, misses: 0 }), null)
-    assert.equal(parseRun({ community: 'Saga.js', playerName: '', elapsedMs: 20_000, hits: 10, misses: 0 }), null)
+    assert.equal(parseRun({ community: '  ', playerName: 'たろう', elapsedMs: 20_000, hits: 10, misses: 0, roundSize: 20 }), null)
+    assert.equal(parseRun({ community: 'Saga.js', playerName: '', elapsedMs: 20_000, hits: 10, misses: 0, roundSize: 20 }), null)
   })
 
   it('大文字小文字と空白のゆれは同じキーになる', () => {
@@ -51,15 +83,23 @@ describe('記録の検証', () => {
       elapsedMs: 20_000,
       hits: 10,
       misses: 0,
+      roundSize: 20,
     })
     assert.equal(parsed?.community, 'SAGA.JS')
     assert.equal(parsed?.communityKey, 'saga.js')
     assert.equal(parsed?.playerKey, 'taro')
   })
 
+  it('問題数が無いか範囲外なら受け取らない', () => {
+    const base = { community: 'Saga.js', playerName: 'たろう', elapsedMs: 20_000, hits: 10, misses: 0 }
+    assert.equal(parseRun(base), null)
+    assert.equal(parseRun({ ...base, roundSize: MAX_ROUND_SIZE + 1 }), null)
+    assert.equal(parseRun({ ...base, roundSize: 30 })?.roundSize, 30)
+  })
+
   it('0秒のタイムは受け取らない', () => {
     assert.equal(
-      parseRun({ community: 'Saga.js', playerName: 'たろう', elapsedMs: 0, hits: 10, misses: 0 }),
+      parseRun({ community: 'Saga.js', playerName: 'たろう', elapsedMs: 0, hits: 10, misses: 0, roundSize: 20 }),
       null,
     )
   })

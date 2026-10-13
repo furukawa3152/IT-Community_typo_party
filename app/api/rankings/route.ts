@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   const db = await getPartyDb()
-  const rankings = buildRankings(await db.listRuns())
+  const { roundSize } = await db.getSettings()
+  const rankings = buildRankings(await db.listRuns(roundSize))
   return NextResponse.json(rankings)
 }

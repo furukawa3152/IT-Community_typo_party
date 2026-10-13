@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
 import { formatTime } from '@/lib/format'
@@ -9,10 +10,9 @@ import {
   type CommunityOption,
   type Rankings,
 } from '@/lib/ranking'
-import { pickRound, ROUND_SIZE } from '@/lib/round'
+import { DEFAULT_ROUND_SIZE, isRoundSize, pickRound, planRound } from '@/lib/round'
 import {
   advanceStates,
-  allowsTrailingN,
   calcResult,
   INITIAL_STATES,
   isWordComplete,
@@ -40,7 +40,6 @@ type Session = {
   index: number
   units: TypingUnit[]
   states: TypingState[]
-  graceN: boolean
   hits: number
   misses: number
   cleared: number
@@ -48,6 +47,18 @@ type Session = {
 }
 
 const EMPTY_RANKINGS: Rankings = { communities: [], players: [] }
+
+/** 設定画面で変えた問題数を読む。読めなければ手元の値のまま */
+async function fetchRoundSize(fallback: number): Promise<number> {
+  try {
+    const response = await fetch('/api/settings', { cache: 'no-store' })
+    if (!response.ok) return fallback
+    const data = (await response.json()) as { roundSize?: unknown }
+    return isRoundSize(data.roundSize) ? data.roundSize : fallback
+  } catch {
+    return fallback
+  }
+}
 
 export function PartyGame() {
   const [phase, setPhase] = useState<Phase>('entry')
@@ -63,6 +74,8 @@ export function PartyGame() {
   const [rankingsReady, setRankingsReady] = useState(false)
   const [isBest, setIsBest] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [roundSize, setRoundSize] = useState(DEFAULT_ROUND_SIZE)
+  const [starting, setStarting] = useState(false)
 
   const sessionRef = useRef<Session | null>(null)
   const startedAtRef = useRef(0)
@@ -70,25 +83,31 @@ export function PartyGame() {
   const hasSubmittedRef = useRef(false)
   const rankingsRef = useRef(rankings)
   rankingsRef.current = rankings
+  const roundSizeRef = useRef(roundSize)
+  roundSizeRef.current = roundSize
+  const startingRef = useRef(false)
 
   const applySession = useCallback((next: Session) => {
     sessionRef.current = next
     setSession(next)
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
-    fetch('/api/rankings')
+  const loadRankings = useCallback(() => {
+    return fetch('/api/rankings', { cache: 'no-store' })
       .then((response) => response.json())
-      .then((data: Rankings) => {
-        if (!cancelled) setRankings(data)
-      })
+      .then((data: Rankings) => setRankings(data))
       .catch(() => {
         // ランキングが読めなくても、入力とプレイは続ける
       })
-      .finally(() => {
-        if (!cancelled) setRankingsReady(true)
-      })
+      .finally(() => setRankingsReady(true))
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    void loadRankings()
+    void fetchRoundSize(DEFAULT_ROUND_SIZE).then((size) => {
+      if (!cancelled) setRoundSize(size)
+    })
 
     fetch('/api/communities')
       .then((response) => response.json())
@@ -101,7 +120,7 @@ export function PartyGame() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [loadRankings])
 
   useEffect(() => {
     return () => {
@@ -115,16 +134,25 @@ export function PartyGame() {
     missTimerRef.current = setTimeout(() => setIsMiss(false), MISS_FLASH_MS)
   }, [])
 
-  const startRound = useCallback(() => {
+  const startRound = useCallback(async () => {
     const nextIdentity = parseIdentity(community, playerName)
-    if (!nextIdentity) return
-    const queue = pickRound()
+    if (!nextIdentity || startingRef.current) return
+    startingRef.current = true
+    setStarting(true)
+    // 会場の途中で問題数が変わっていることがあるので、始める直前に読み直す
+    const size = await fetchRoundSize(roundSizeRef.current)
+    startingRef.current = false
+    setStarting(false)
+    if (size !== roundSizeRef.current) {
+      setRoundSize(size)
+      void loadRankings()
+    }
+    const queue = pickRound(size)
     const next: Session = {
       queue,
       index: 0,
       units: unitsFor(queue[0]),
       states: [...INITIAL_STATES],
-      graceN: false,
       hits: 0,
       misses: 0,
       cleared: 0,
@@ -156,7 +184,7 @@ export function PartyGame() {
     setElapsedMs(0)
     setCount(3)
     setPhase('countdown')
-  }, [applySession, community, playerName])
+  }, [applySession, community, loadRankings, playerName])
 
   useEffect(() => {
     if (phase !== 'countdown') return
@@ -204,18 +232,14 @@ export function PartyGame() {
       const nextStates = advanceStates(current.units, current.states, key)
 
       if (nextStates.length === 0) {
-        if (current.graceN && key === 'n') {
-          applySession({ ...current, graceN: false })
-          return
-        }
-        applySession({ ...current, misses: current.misses + 1, graceN: false })
+        applySession({ ...current, misses: current.misses + 1 })
         flashMiss()
         return
       }
 
       const hits = current.hits + 1
       if (!isWordComplete(current.units, nextStates)) {
-        applySession({ ...current, states: nextStates, hits, graceN: false })
+        applySession({ ...current, states: nextStates, hits })
         return
       }
 
@@ -225,10 +249,9 @@ export function PartyGame() {
         states: nextStates,
         hits,
         cleared,
-        graceN: allowsTrailingN(word),
       }
 
-      if (cleared >= ROUND_SIZE) {
+      if (cleared >= current.queue.length) {
         const elapsed = Date.now() - startedAtRef.current
         const done = { ...finished, elapsedMs: elapsed }
         const player = identityFromRefs(rankingsRef.current, community, playerName)
@@ -267,6 +290,7 @@ export function PartyGame() {
         elapsedMs: session.elapsedMs,
         hits: session.hits,
         misses: session.misses,
+        roundSize: session.queue.length,
       }),
     })
       .then(async (response) => {
@@ -297,6 +321,8 @@ export function PartyGame() {
     })
   }, [phase, session])
 
+  const plan = planRound(session?.queue.length ?? roundSize)
+
   if (phase === 'countdown') {
     return (
       <main className="stage countdown">
@@ -305,7 +331,7 @@ export function PartyGame() {
           <span className="who-name">{identity?.playerName}</span>
         </p>
         <p key={count} className="count" aria-live="assertive">{count}</p>
-        <p className="countdown-note">用語12個とコード8行。カウントが終わると計測が始まる</p>
+        <p className="countdown-note">用語{plan.terms}個とコード{plan.codes}行。カウントが終わると計測が始まる</p>
       </main>
     )
   }
@@ -333,14 +359,14 @@ export function PartyGame() {
         >
           <p className="prompt-meta">
             <span className="progress" data-testid="progress">
-              {session.cleared + 1}<span className="of">/{ROUND_SIZE}</span>
+              {session.cleared + 1}<span className="of">/{session.queue.length}</span>
             </span>
             {word.lang && <span className="lang" data-testid="lang">{word.lang}</span>}
           </p>
           <h2 className="gloss">{word.display}</h2>
           <p
             className="line"
-            data-testid="romaji"
+            data-testid="keys"
             style={{ '--len': word.keys.length } as CSSProperties}
           >
             {word.keys.split('').map((char, index) => {
@@ -408,11 +434,13 @@ export function PartyGame() {
               <div><dt>ミス</dt><dd>{session.misses}</dd></div>
             </dl>
             <div className="actions">
-              <button type="button" className="primary" onClick={startRound}>もう一度</button>
+              <button type="button" className="primary" onClick={() => void startRound()} disabled={starting}>
+                もう一度
+              </button>
               <button type="button" className="ghost" onClick={() => setPhase('entry')}>名前を変える</button>
             </div>
           </section>
-          <RankingsView rankings={rankings} ready identity={identity} />
+          <RankingsView rankings={rankings} ready identity={identity} roundSize={plan.size} />
         </div>
       </main>
     )
@@ -428,11 +456,11 @@ export function PartyGame() {
           className="entry-form"
           onSubmit={(event) => {
             event.preventDefault()
-            startRound()
+            void startRound()
           }}
         >
           <p className="lead">
-            プログラミングのことば12個と、Python や HTML の1行コード8行。20問を打ち切るまでの速さで、コミュニティの順位が動く。
+            IT の英単語{plan.terms}個と、Python や HTML の1行コード{plan.codes}行。{plan.size}問を打ち切るまでの速さで、コミュニティの順位が動く。
           </p>
           <div className="field">
             <label htmlFor="community">コミュニティ</label>
@@ -476,19 +504,22 @@ export function PartyGame() {
               required
             />
           </div>
-          <button className="primary start" type="submit" disabled={!ready}>
-            20問に挑戦する
+          <button className="primary start" type="submit" disabled={!ready || starting}>
+            {plan.size}問に挑戦する
           </button>
           <ul className="rules">
-            <li><kbd>n</kbd> でも <kbd>nn</kbd> でも「ん」。<kbd>shi</kbd> でも <kbd>si</kbd> でも「し」</li>
-            <li>長音の「ー」は <kbd>-</kbd>、空白は <kbd>Space</kbd></li>
+            <li>英単語は大文字小文字を気にしなくていい。空白は <kbd>Space</kbd></li>
             <li>コードは書いてあるとおり。記号も大文字小文字もそのまま</li>
             <li>日本語入力はオフにしておく</li>
           </ul>
+          <p className="admin-link">
+            <Link href="/settings">設定</Link>
+          </p>
         </form>
         <RankingsView
           rankings={rankings}
           ready={rankingsReady}
+          roundSize={plan.size}
           identity={parseIdentity(community, playerName)}
         />
       </div>
@@ -507,7 +538,7 @@ function Masthead({ compact = false }: { compact?: boolean }) {
   )
 }
 
-/** 20問の進み具合。用語は丸、コードは横長で示す */
+/** 1試合の進み具合。用語は丸、コードは横長で示す */
 function Track({ queue, cleared }: { queue: readonly Word[]; cleared: number }) {
   return (
     <ol className="track" aria-label={`${cleared} / ${queue.length} 問クリア`}>
@@ -528,15 +559,17 @@ function RankingsView({
   rankings,
   identity,
   ready,
+  roundSize,
 }: {
   rankings: Rankings
   identity: Identity | null
   ready: boolean
+  roundSize: number
 }) {
   return (
     <section className="ranking">
       <h2>コミュニティ順位</h2>
-      <p className="ranking-note">数字は、そのコミュニティで一番速い人のタイム</p>
+      <p className="ranking-note">{roundSize}問の記録。数字は、そのコミュニティで一番速い人のタイム</p>
       {rankings.communities.length === 0 ? (
         <p className="empty">{ready ? 'まだ記録がない。最初の1人になろう' : '読み込み中'}</p>
       ) : (
@@ -559,7 +592,7 @@ function RankingsView({
 
       <h2 className="subhead">個人の自己ベスト</h2>
       {rankings.players.length === 0 ? (
-        <p className="empty">{ready ? '20問を打ち切るとここに載る' : '読み込み中'}</p>
+        <p className="empty">{ready ? `${roundSize}問を打ち切るとここに載る` : '読み込み中'}</p>
       ) : (
         <ol className="board players" data-testid="player-ranking">
           {rankings.players.slice(0, 20).map((entry) => {
