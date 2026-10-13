@@ -20,8 +20,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: '名前、コミュニティ、タイムを確認してください' }, { status: 400 })
   }
 
-  const db = await getPartyDb()
-  await db.insertRun(run)
-  const { roundSize } = await db.getSettings()
-  return NextResponse.json(buildRankings(await db.listRuns(roundSize)))
+  try {
+    const db = await getPartyDb()
+    await db.insertRun(run)
+    const { roundSize } = await db.getSettings()
+    return NextResponse.json(buildRankings(await db.listRuns(roundSize)))
+  } catch (error) {
+    console.error('[v0] Failed to save run:', error)
+    return NextResponse.json(
+      { error: 'データベースへの保存に失敗しました' },
+      { status: 503 },
+    )
+  }
 }
